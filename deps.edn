@@ -3,14 +3,16 @@
  :aliases
  {:dev
   {:extra-paths ["test" "dev"],
-   :classpath-overrides {org.clojure/clojure nil}
    :extra-deps
-   {com.github.jpmonettas/clojure {:mvn/version "1.12.0-alpha4_1"}
-    com.github.jpmonettas/flow-storm-dbg {:mvn/version "3.6.7"}
-    metosin/malli {:mvn/version "0.11.0"},
+   {metosin/malli {:mvn/version "0.11.0"},
     com.bhauman/figwheel-main {:mvn/version "0.2.18"},
-    io.github.robertluo/rich-comment-tests {:git/tag "v1.1.0", :git/sha "6d01d12"}}
-   :jvm-opts ["-Dclojure.storm.instrumentEnable=true" "-Dclojure.storm.instrumentOnlyPrefixes=sg.flybot"]},
+    io.github.robertluo/rich-comment-tests {:git/tag "v1.1.0", :git/sha "6d01d12"}}},
+  :debug 
+  {:classpath-overrides {org.clojure/clojure nil}
+   :extra-deps 
+   {com.github.jpmonettas/clojure {:mvn/version "1.12.0-alpha4_1"}
+    com.github.jpmonettas/flow-storm-dbg {:mvn/version "3.7.1"}} 
+   :jvm-opts ["-Dclojure.storm.instrumentEnable=true" "-Dclojure.storm.instrumentOnlyPrefixes=sg.flybot"]}
   :notebook {:extra-deps {io.github.nextjournal/clerk {:mvn/version "0.14.919"}}},
   :readme
   {:extra-deps {io.github.robertluo/clerk-doc {:git/tag "v0.2.1", :git/sha "d2b37f0"}},

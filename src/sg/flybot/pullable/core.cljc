@@ -10,6 +10,15 @@
    [sg.flybot.pullable.core.option :as option]
    [sg.flybot.pullable.core.context :as context]))
 
+;;---------------------------
+;; # Pullable core
+;; ## Basic design
+;; The interaction of `Acceptor`s and `DataQuery`s made the query of maps
+;; and sequences work.
+;; An acceptor is a context which can accept kv data which can be a map, a
+;; sequence etc., a DataQuery is a going to attract kv from data, then call
+;; an acceptor to accept it.
+
 (defprotocol Acceptor
   "An acceptor receives information"
   (-accept
@@ -28,10 +37,6 @@
     [query data acceptor]
     "run `query` based on `data`, using `acceptor` to accept the result"))
 
-(extend-protocol Acceptor
-  nil
-  (-accept [_ _ _] nil))
-
 (defn run-query
   "runs a query `q` on `data` using `acceptor` (when nil uses q's default acceptor)"
   ([q data]
@@ -46,7 +51,12 @@
         m    (context/-finalize fac {})]
     (when rslt (assoc m '&? rslt))))
 
-;; Implementation
+;;-----------------------------
+;; ## Acceptor implementations
+
+(extend-protocol Acceptor
+  nil
+  (-accept [_ _ _] nil))
 
 (defn- map-acceptor
   "an acceptor of a map `m`"
@@ -59,12 +69,25 @@
         :else
         (assoc m k v)))))
 
+(defn- vector-acceptor []
+  (reify Acceptor
+    (-accept [_ k v] [k v])))
+
+(defn- value-acceptor
+  "returns an acceptor of value only"
+  []
+  (reify Acceptor
+    (-accept [_ _ v] v)))
+
 ^:rct/test
 (comment
   (-accept (map-acceptor {}) :foo "bar") ;=> {:foo "bar"}
   (-accept (map-acceptor {}) :foo nil) ;=> {}
   (-accept (map-acceptor {}) nil "bar") ;=> nil
   )
+
+;;-----------------------------
+;; ## DataQuery implementations
 
 (defn fn-query
   "a query using a function to extract data
@@ -84,16 +107,6 @@
   ;;fn-query returns empty map when not found
   (run-query (fn-query :a) {:b 3}) ;=> {}
   )
-
-(defn- vector-acceptor []
-  (reify Acceptor
-    (-accept [_ k v] [k v])))
-
-(defn- value-acceptor
-  "returns an acceptor of value only"
-  []
-  (reify Acceptor
-    (-accept [_ _ v] v)))
 
 (defn join-query
   "returns a joined query of two queries
