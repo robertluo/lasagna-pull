@@ -31,7 +31,7 @@
     [query]
     "returns the id (a.k.a key) of the query")
   (-default-acceptor
-    [query]
+    [query data]
     "return the default acceptor if the query is running independently")
   (-run
     [query data acceptor]
@@ -42,7 +42,7 @@
   ([q data]
    (run-query q data nil))
   ([q data acceptor]
-   (-run q data (or acceptor (-default-acceptor q)))))
+   (-run q data (or acceptor (-default-acceptor q data)))))
 
 (defn run-bind
   [q data]
@@ -98,7 +98,7 @@
   ([k f]
    (reify DataQuery
      (-id [_] k)
-     (-default-acceptor [_] (map-acceptor {}))
+     (-default-acceptor [_ data] (map-acceptor (with-meta {} (meta data))))
      (-run [_ data acceptor]
        (-accept acceptor k (f data))))))
 
@@ -115,7 +115,7 @@
   [parent child]
   (reify DataQuery
     (-id [_] (-id parent))
-    (-default-acceptor [_] (-default-acceptor parent))
+    (-default-acceptor [_ data] (-default-acceptor parent data))
     (-run [this data acceptor]
       (let [parent-data (run-query parent data (value-acceptor))]
         (-accept
@@ -123,7 +123,7 @@
          (-id this)
          (if (or (nil? parent-data) (error? parent-data))
            parent-data
-           (run-query child parent-data (-default-acceptor child))))))))
+           (run-query child parent-data (-default-acceptor child data))))))))
 
 ^:rct/test
 (comment
@@ -139,7 +139,7 @@
   [queries]
   (reify DataQuery
     (-id [_] (map -id queries))
-    (-default-acceptor [_] (value-acceptor))
+    (-default-acceptor [_ _] (value-acceptor))
     (-run [this data acceptor]
       (-accept
        acceptor
@@ -165,7 +165,7 @@
   [q]
   (reify DataQuery
     (-id [_] (-id q))
-    (-default-acceptor [_] (value-acceptor))
+    (-default-acceptor [_ _] (value-acceptor))
     (-run [this coll acceptor]
       (if (sequential? coll)
         (-accept
@@ -192,7 +192,7 @@
   [q pred]
   (reify DataQuery
     (-id [_] (-id q))
-    (-default-acceptor [_] (-default-acceptor q))
+    (-default-acceptor [_ data] (-default-acceptor q data))
     (-run [this data ctx]
       (let [d (run-query q data (value-acceptor))]
         (-accept ctx (when (pred data d) (-id this)) nil)))))
@@ -216,7 +216,7 @@
        [_ q args]
        (reify DataQuery
          (-id [_] (-id q))
-         (-default-acceptor [_] (-default-acceptor q))
+         (-default-acceptor [_ data] (-default-acceptor q data))
          (-run [_ data acceptor]
            (let [[k v] (->> (-run q data (vector-acceptor)) (modifier args))]
              (-accept acceptor k v)))))
@@ -248,7 +248,7 @@
 (defn- mock-query [k v]
   (reify DataQuery
     (-id [_] k)
-    (-default-acceptor [_] (map-acceptor {}))
+    (-default-acceptor [_ _] (map-acceptor {}))
     (-run [_ _ _] [k v])))
 
 ^:rct/test
@@ -277,7 +277,7 @@
   ([child f-post-process]
    (reify DataQuery
      (-id [_] (-id child))
-     (-default-acceptor [_] (-default-acceptor child))
+     (-default-acceptor [_ data] (-default-acceptor child data))
      (-run [this data acceptor]
        (let [v (some-> (run-query child data (vector-acceptor))
                        (f-post-process)
