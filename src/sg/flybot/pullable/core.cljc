@@ -22,7 +22,7 @@
 (defprotocol Acceptor
   "An acceptor receives information"
   (-accept
-    [acpt k v]
+    [acpt k v vname]
     "accept `k`,`v` pair, returns resulting data"))
 
 (defprotocol DataQuery
@@ -56,34 +56,42 @@
 
 (extend-protocol Acceptor
   nil
-  (-accept [_ _ _] nil))
+  (-accept [_ _ _ _] nil))
+
+(defn- bind-var [m vname v]
+  (vary-meta m update ::bindings assoc vname v))
+
+(defn- var-value [data vname]
+  (some-> data meta ::bindings vname))
 
 (defn- map-acceptor
   "an acceptor of a map `m`"
   [m]
   (reify Acceptor
-    (-accept [_ k v]
+    (-accept [_ k v vname]
       (cond
         (nil? k) nil
         (nil? v) m
         :else
-        (assoc m k v)))))
+        (cond-> (assoc m k v)
+          vname (bind-var vname v))))))
 
 (defn- vector-acceptor []
   (reify Acceptor
-    (-accept [_ k v] [k v])))
+    (-accept [_ k v _] [k v])))
 
 (defn- value-acceptor
   "returns an acceptor of value only"
   []
   (reify Acceptor
-    (-accept [_ _ v] v)))
+    (-accept [_ _ v _] v)))
 
 ^:rct/test
 (comment
-  (-accept (map-acceptor {}) :foo "bar") ;=> {:foo "bar"}
-  (-accept (map-acceptor {}) :foo nil) ;=> {}
-  (-accept (map-acceptor {}) nil "bar") ;=> nil
+  (-accept (map-acceptor {}) :foo "bar" nil) ;=> {:foo "bar"}
+  (-accept (map-acceptor {}) :foo nil nil) ;=> {}
+  (-accept (map-acceptor {}) nil "bar" nil) ;=> nil
+  (-accept (map-acceptor {}) :a 3 '?b) ;=> {:a 3}
   )
 
 ;;-----------------------------
@@ -100,7 +108,7 @@
      (-id [_] k)
      (-default-acceptor [_ data] (map-acceptor (with-meta {} (meta data))))
      (-run [_ data acceptor]
-       (-accept acceptor k (f data))))))
+       (-accept acceptor k (f data) nil)))))
 
 ^:rct/test
 (comment
@@ -123,7 +131,8 @@
          (-id this)
          (if (or (nil? parent-data) (error? parent-data))
            parent-data
-           (run-query child parent-data (-default-acceptor child data))))))))
+           (run-query child parent-data (-default-acceptor child data)))
+         nil)))))
 
 ^:rct/test
 (comment
@@ -150,7 +159,8 @@
           ([acc] acc)
           ([acc item] (if item (merge acc item) (reduced nil))))
         {}
-        queries)))))
+        queries)
+       nil))))
 
 ^:rct/test
 (comment
@@ -175,7 +185,8 @@
           (map #(run-query q %))
           conj
           []
-          coll))
+          coll)
+         nil)
         (data-error coll (-id this) "expect sequential data")))))
 
 ^:rct/test
@@ -195,7 +206,7 @@
     (-default-acceptor [_ data] (-default-acceptor q data))
     (-run [this data ctx]
       (let [d (run-query q data (value-acceptor))]
-        (-accept ctx (when (pred data d) (-id this)) nil)))))
+        (-accept ctx (when (pred data d) (-id this)) nil nil)))))
 
 ^:rct/test
 (comment
@@ -209,6 +220,31 @@
   (run-query (vector-query [fq (fn-query :b)]) {:a 1 :b 4 :c 5}) ;=> {:b 4}
   )
 
+(defn named-query
+  "returns a named query wrapping query `q` with binding name `vname`.
+   if data already binds vname, it acts as a filter query, otherwise
+   will bind the value to data."
+  [vname q]
+  (reify DataQuery
+    (-id [_] (-id q))
+    (-default-acceptor [_ data] (-default-acceptor q data))
+    (-run
+      [_ data acceptor]
+      (if-let [vv (var-value data vname)]
+        (-run (filter-query q (fn [_ v] (= v vv))) data acceptor)
+        (let [[k new-v] (-run q data (vector-acceptor))]
+          (-accept acceptor k new-v vname))))))
+
+^:rct/test
+(comment
+  (def nq (named-query '?a (fn-query :a)))
+  (run-query nq (with-meta {:a 3} {::bindings {'?a 3}})) ;=> {}
+  (run-query nq {:a 3}) ;=>> #(= 3 (var-value % '?a))
+  )
+
+;;----------------------------
+;;## Context related
+
 (defn context-of
   ([modifier finalizer]
    (reify context/QueryContext
@@ -219,7 +255,7 @@
          (-default-acceptor [_ data] (-default-acceptor q data))
          (-run [_ data acceptor]
            (let [[k v] (->> (-run q data (vector-acceptor)) (modifier args))]
-             (-accept acceptor k v)))))
+             (-accept acceptor k v nil)))))
      (-finalize
        [_ m]
        (finalizer m)))))
@@ -282,7 +318,7 @@
        (let [v (some-> (run-query child data (vector-acceptor))
                        (f-post-process)
                        (second))]
-         (-accept acceptor (-id this) v))))))
+         (-accept acceptor (-id this) v nil))))))
 
 ;;## Post processors
 
