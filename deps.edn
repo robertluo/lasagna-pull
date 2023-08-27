@@ -1,5 +1,5 @@
 {:paths ["src" "resources"],
- :deps {},
+ :deps {com.github.igrishaev/zippo {:mvn/version "0.1.2"}},
  :aliases
  {:dev ;general development
   {:extra-paths ["test" "dev"],
