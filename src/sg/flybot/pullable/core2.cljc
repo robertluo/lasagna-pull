@@ -2,12 +2,11 @@
   "try use zipper to rewrite core"
   (:require
    [clojure.zip :as zip]
-   [zippo.core :as zippo])
-  (:import
-   (java.util Map)))
+   [zippo.core :as zippo]))
 
 ;;--------------------
 ;; ##zip basic improve
+
 (defn next-move
   "most code are copied from clojure.zip, works just like `zip/next`,
    while it attached direction metadata where the node travels from."
@@ -43,32 +42,35 @@
   (on-zip {:a {:b 5} :c 3})
   )
 
-(defprotocol SingleSpec
-  (-editing [spec]))
+(defn data-error [reason & {:as data}]
+  (merge data {:error/reason reason}))
+
+(defn editing [x]
+  (cond
+    (map? x) #(select-keys % (keys x))
+    :else identity))
 
 (let [dirs {:right   [zip/right]
             :down    [zip/down]
             :up      [zip/up]
             :upright [zip/up zip/right]}]
   (defn loc->f
-    [loc] 
-    (let [direction (some-> loc meta ::direction)
-          fs (conj (get dirs direction []) (fn [loc] (zip/edit loc (fn [body] (-editing body)))))]
-      (apply comp fs))))
+    [ptn-loc] 
+    (let [direction (some-> ptn-loc meta ::direction)
+          fs (conj (get dirs direction []) (fn [loc] (zip/edit loc (editing (zip/node ptn-loc)))))]
+      fs)))
 
-(defn data-error [reason & {:as data}]
-  (merge data {:error/reason reason}))
+(defn pattern->f
+  [x]
+  (comp zip/root
+        (->> (zippo/coll-zip x)
+             (loc-seq)
+             (mapcat loc->f)
+             (reverse)
+             (apply comp))))
 
-(extend-protocol SingleSpec
-  nil
-  (-function [_] identity)
-  
-  Object
-  (-function [_] (constantly (data-error :not-implemented)))
-  
-  Map
-  (-function [_] (fn [m] (select-keys m (keys m)))))
-
+^:rct/test
 (comment
-  (loc->f ^{::direction :down} [nil :end])
+  ((pattern->f {:a '? :b '?}) (zippo/coll-zip {:a 1 :b 2 :c 4})) ;=> {:a 1 :b 2}
+  ((pattern->f {:a {:b '?}}) (zippo/coll-zip {:a {:b 1} :c 2})) ;=> {:a {:b 1}}
   )
