@@ -91,6 +91,22 @@
   ([f pattern data]
    ((f pattern) data)))
 
+^:rct/test
+(comment
+  ; issue 67 failed case
+  ((query '{:user/items [{:reward/store {:store/identity    "id2"
+                                         :store/description ?desc}
+                          :item/expired-at ?expired-at}]})
+   {:user/items [{:reward/store {:store/identity    "id1"
+                                 :store/description "description"}
+                  :item/expired-at 100}
+                 {:reward/store {:store/identity    "id2"
+                                 :store/description "descriptio2"}
+                  :item/expired-at 200}]})
+  ;=> {?desc "descriptio2" ?expired-at 200
+  ;    &? #:user{:items [nil #:item{:expired-at 200}]}}
+  )
+
 (defmacro qfn 
   "returns an anonymous query function on `pattern` takes a single argument `data`:
    Returns `nil` if failed to match, otherwise, all logical variables in the pattern
