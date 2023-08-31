@@ -6,7 +6,7 @@
    :extra-deps
    {metosin/malli {:mvn/version "0.11.0"},
     com.bhauman/figwheel-main {:mvn/version "0.2.18"},
-    io.github.robertluo/rich-comment-tests {:git/tag "v1.1.0", :git/sha "6d01d12"}}},
+    io.github.robertluo/rich-comment-tests {:git/tag "v1.1.1", :git/sha "3f65ecb"}}},
   
   :debug ;enable flowstorm debugger for IDE working
   {:classpath-overrides {org.clojure/clojure nil}

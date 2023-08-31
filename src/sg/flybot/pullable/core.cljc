@@ -10,27 +10,36 @@
    [sg.flybot.pullable.core.option :as option]
    [sg.flybot.pullable.core.context :as context]))
 
+;;---------------------
+;;# Core of pullable
+;;
+;; Pullable queries target data structure by using `DataQuery`, it
+;; can `-run` on `data`, then call a `acceptor` to accept the result,
+;; a `k` and a `v`.
+;;
+;; An acceptor is a context which will accept kv then produce the
+;; result in its own discretion. For example, a value-only acceptor
+;; can skip `k`, while a map acceptor should associate kv pairs.
+;;
+;; ## Core protocols and functions
+
 (defprotocol Acceptor
-  "An acceptor receives information"
+  "An acceptor receives kv pair and produce a result"
   (-accept
     [acpt k v]
     "accept `k`,`v` pair, returns resulting data"))
 
 (defprotocol DataQuery
-  "Query"
+  "DataQuery can query data then pass the key information to an acceptor"
+  (-run
+   [query data acceptor]
+   "run `query` based on `data`, using `acceptor` to accept the result")
   (-id
     [query]
     "returns the id (a.k.a key) of the query")
   (-default-acceptor
     [query]
-    "return the default acceptor if the query is running independently")
-  (-run
-    [query data acceptor]
-    "run `query` based on `data`, using `acceptor` to accept the result"))
-
-(extend-protocol Acceptor
-  nil
-  (-accept [_ _ _] nil))
+    "return the default acceptor if the query is running independently"))
 
 (defn run-query
   "runs a query `q` on `data` using `acceptor` (when nil uses q's default acceptor)"
@@ -46,7 +55,14 @@
         m    (context/-finalize fac {})]
     (when rslt (assoc m '&? rslt))))
 
-;; Implementation
+;;--------------------------
+;; ## Implementation
+;;
+;; ### Acceptors
+
+(extend-protocol Acceptor
+  nil
+  (-accept [_ _ _] nil))
 
 (defn- map-acceptor
   "an acceptor of a map `m`"
@@ -57,7 +73,7 @@
         (nil? k) nil
         (nil? v) m
         :else
-        (assoc m k v)))))
+        (vary-meta (assoc m k v) merge (meta v))))))
 
 ^:rct/test
 (comment
@@ -65,6 +81,20 @@
   (-accept (map-acceptor {}) :foo nil) ;=> {}
   (-accept (map-acceptor {}) nil "bar") ;=> nil
   )
+
+(defn- vector-acceptor []
+  (reify Acceptor
+    (-accept [_ k v] [k v])))
+
+(defn- value-acceptor
+  "returns an acceptor of value only"
+  []
+  (reify Acceptor
+    (-accept [_ _ v] v)))
+
+;;------------------------
+;;### DataQueries
+;;
 
 (defn fn-query
   "a query using a function to extract data
@@ -81,19 +111,9 @@
 
 ^:rct/test
 (comment
-  ;;fn-query returns empty map when not found
+  ;fn-query returns empty map when not found
   (run-query (fn-query :a) {:b 3}) ;=> {}
   )
-
-(defn- vector-acceptor []
-  (reify Acceptor
-    (-accept [_ k v] [k v])))
-
-(defn- value-acceptor
-  "returns an acceptor of value only"
-  []
-  (reify Acceptor
-    (-accept [_ _ v] v)))
 
 (defn join-query
   "returns a joined query of two queries
@@ -104,16 +124,17 @@
     (-id [_] (-id parent))
     (-default-acceptor [_] (-default-acceptor parent))
     (-run [this data acceptor]
-      (let [parent-data (run-query parent data (value-acceptor))]
+      (let [parent-data (-run parent data (value-acceptor))]
         (-accept
          acceptor
          (-id this)
          (if (or (nil? parent-data) (error? parent-data))
            parent-data
-           (run-query child parent-data (-default-acceptor child))))))))
+           (-run child parent-data (-default-acceptor child))))))))
 
 ^:rct/test
 (comment
+  ;join query can do nested query
   (def q (join-query (fn-query :a) (fn-query :b)))
   (run-query q {:a {:b 2}}) ;=> {:a {:b 2}}
   (run-query q {}) ;=> {}
@@ -141,6 +162,7 @@
 
 ^:rct/test
 (comment
+  ; vector-query are queries on different keys
   (def vq (vector-query [(fn-query :a) (fn-query :b)]))
   (run-query vq {:a 5}) ;=> {:a 5}
   (run-query vq {:a 3 :b 4 :c 5}) ;=> {:a 3 :b 4}
@@ -180,9 +202,9 @@
   (reify DataQuery
     (-id [_] (-id q))
     (-default-acceptor [_] (-default-acceptor q))
-    (-run [this data ctx]
+    (-run [this data acceptor]
       (let [d (run-query q data (value-acceptor))]
-        (-accept ctx (when (pred data d) (-id this)) nil)))))
+        (-accept acceptor (when (pred data d) (-id this)) nil)))))
 
 ^:rct/test
 (comment
@@ -195,6 +217,34 @@
   (run-query (vector-query [fq (fn-query :b)]) {:a 0 :b 4 :c 5}) ;=> nil
   (run-query (vector-query [fq (fn-query :b)]) {:a 1 :b 4 :c 5}) ;=> {:b 4}
   )
+
+(defn named-query 
+  "returns a named query"
+  [q v-name]
+  (reify DataQuery
+    (-id [_] (-id q))
+    (-default-acceptor [_] (-default-acceptor q))
+    (-run
+      [this data acceptor]
+      (let [bindings (some-> data meta ::bindings)
+            v-value  (if bindings (get bindings v-name ::unbound) ::unbound)]
+        (if (= v-value ::unbound)
+          (let [v    (-run q data (value-acceptor))
+                rslt (-accept acceptor (-id this) v)]
+            (vary-meta rslt update ::bindings assoc v-name v))
+          (-run (filter-query q (fn [_ v] (= v v-value))) data acceptor))))))
+
+^:rct/test
+(comment
+  (def nq (named-query (fn-query :a) '?a))
+  ;first time bindings
+  ((juxt identity meta) (run-query nq {:a 1})) ;=>> [{:a 1} {::bindings {'?a 1}}]
+  ;bound
+  (run-query nq ^{::bindings {'?a 2}} {:a 1}) ;=> nil
+  (def nq (join-query (fn-query :a) (named-query (fn-query :b) '?b)))
+  ((juxt identity meta) (run-query nq {:a {:b 1}})) ;=>> [{:a {:b 1}} {::bindings {'?b 1}}] 
+  )
+
 
 (defn context-of
   ([modifier finalizer]
